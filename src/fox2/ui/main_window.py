@@ -166,8 +166,26 @@ class MainWindow(ctk.CTk):
         self.status_label = ctk.CTkLabel(left, text="Ожидание...", anchor="w")
         self.status_label.grid(row=7, column=0, sticky="ew", padx=12, pady=(2, 6))
 
-        # Log textbox
-        ctk.CTkLabel(left, text="Лог:", anchor="w").grid(row=10, column=0, sticky="w", padx=12)
+        # Log textbox + копировать/очистить
+        log_header = ctk.CTkFrame(left, fg_color="transparent")
+        log_header.grid(row=10, column=0, sticky="ew", padx=12)
+        log_header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(log_header, text="Лог:", anchor="w").grid(row=0, column=0, sticky="w")
+        ctk.CTkButton(
+            log_header,
+            text="📋 Копировать",
+            width=110,
+            height=24,
+            command=self._copy_log,
+        ).grid(row=0, column=1, sticky="e", padx=(4, 0))
+        ctk.CTkButton(
+            log_header,
+            text="🗑 Очистить",
+            width=100,
+            height=24,
+            command=self._clear_log,
+        ).grid(row=0, column=2, sticky="e", padx=(4, 0))
+
         self.log_box = ctk.CTkTextbox(left, height=160, fg_color="#0e0c18", text_color=COLOR_TEXT)
         self.log_box.grid(row=11, column=0, sticky="nsew", padx=12, pady=(2, 12))
         self.log_box.configure(state="disabled")
@@ -213,6 +231,25 @@ class MainWindow(ctk.CTk):
         self.log_box.insert("end", line + "\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
+
+    def _copy_log(self) -> None:
+        text = self.log_box.get("1.0", "end").rstrip("\n")
+        if not text:
+            self._set_status("Лог пустой — нечего копировать.")
+            return
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        # Tk «отпускает» буфер при закрытии окна, если ничего не делать —
+        # вызываем update(), чтобы данные доехали в системный clipboard.
+        self.update()
+        n_lines = text.count("\n") + 1
+        self._set_status(f"Лог скопирован в буфер обмена ({n_lines} стр.)")
+
+    def _clear_log(self) -> None:
+        self.log_box.configure(state="normal")
+        self.log_box.delete("1.0", "end")
+        self.log_box.configure(state="disabled")
+        self._set_status("Лог очищен.")
 
     # ---------- ACTIONS ----------
     def _load_txt(self) -> None:
