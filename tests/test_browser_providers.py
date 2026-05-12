@@ -78,32 +78,48 @@ class AccountExhaustionFlowTests(unittest.TestCase):
             with self.assertRaises(AccountExhausted):
                 provider.generate("test", Path(tmp) / "out.png")
 
+    def test_nano_banana_raises_when_no_flow_accounts(self) -> None:
+        """Nano Banana использует Flow-аккаунты — без них падает с AccountExhausted."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = BrowserAccountManager(root=Path(tmp))
+            provider = NanoBananaImage(accounts=mgr)
+            with self.assertRaises(AccountExhausted):
+                provider.generate("test", Path(tmp) / "out.png")
+
     def test_flow_image_falls_through_to_video_provider(self) -> None:
-        """Если в Flow-аккаунте мало кредитов для видео (5), но достаточно для картинки (1),
-        то FlowImage отдаёт результат, а FlowVideo упирается в AccountExhausted."""
+        """Если в Flow-аккаунте мало кредитов для видео (10), но достаточно для картинки (1),
+        FlowVideo упирается в AccountExhausted, а FlowImage выбирает тот же аккаунт."""
         with tempfile.TemporaryDirectory() as tmp:
             mgr = BrowserAccountManager(root=Path(tmp))
             a = mgr.add("flow1", "flow")
-            # Оставим 2 кредита (хватит на картинку, но не на видео)
-            a.credits_used_today = 48
+            # Оставим 5 кредитов (хватит на картинку, но не на видео = 10)
+            a.credits_used_today = 45
             mgr.save()
 
-            # video должен упасть
             video = FlowVideo(accounts=mgr)
             with self.assertRaises(AccountExhausted):
                 video.animate(Path(tmp) / "fake.png", Path(tmp) / "out.mp4", prompt="x")
 
-            # image должен попытаться открыть браузер (упадёт уже на playwright,
-            # но проверим что acquire успешно прошёл)
             image = FlowImage(accounts=mgr)
-            # Мокаем chromium_session, чтобы не открывать реальный браузер.
             with patch("fox2.providers.browser.flow.chromium_session") as mock_session:
-                # Эмулируем, что мы заходим в контекст и ничего не делаем (FlowController
-                # сразу упадёт, но кредиты не списываются, потому что внутри будет ошибка).
                 mock_session.side_effect = RuntimeError("test-bypass")
                 with self.assertRaises(RuntimeError):
                     image.generate("test", Path(tmp) / "out.png")
-                # acquire всё равно должен был выбрать аккаунт.
+                mock_session.assert_called_once()
+
+    def test_nano_banana_uses_exhausted_flow_account(self) -> None:
+        """С cost=0 Nano Banana работает даже когда Flow-аккаунт полностью исчерпан."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = BrowserAccountManager(root=Path(tmp))
+            a = mgr.add("flow1", "flow")
+            a.credits_used_today = 50  # исчерпан
+            mgr.save()
+
+            provider = NanoBananaImage(accounts=mgr)
+            with patch("fox2.providers.browser.nano_banana.chromium_session") as mock_session:
+                mock_session.side_effect = RuntimeError("test-bypass")
+                with self.assertRaises(RuntimeError):
+                    provider.generate("test", Path(tmp) / "out.png")
                 mock_session.assert_called_once()
 
 

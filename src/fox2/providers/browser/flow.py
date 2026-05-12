@@ -1,13 +1,13 @@
-"""Браузерные провайдеры Google Flow (Imagen 4 / Veo 3 на labs.google/fx/tools/flow).
+"""Браузерные провайдеры Google Flow (Imagen 4 / Veo / Nano Banana на labs.google/fx/tools/flow).
 
-Flow требует платную подписку Google AI Pro/Ultra или Workspace-плана. Бесплатных
-кредитов программа не получает — она лишь пользуется тем балансом, который у вас
-есть в Google. С нашей стороны:
+Flow работает на бесплатном тарифе Google: 50 кредитов в день на аккаунт —
+этого хватает на 5 видео Veo (по 10 кред/Generate, 2 выхода) или 50 картинок Imagen.
+Nano Banana внутри Flow кредиты не списывает. С нашей стороны:
 
-* считаем потраченные за день кредиты на каждый аккаунт (5 кред/видео, 1 кред/картинка)
+* считаем потраченные за день кредиты на каждый аккаунт (10 кред/видео, 1 кред/Imagen картинка)
 * при исчерпании одного аккаунта (50 кред/день) — автоматически переключаемся на следующий
-* перед каждой генерацией заходим в Settings и выставляем Outputs per prompt = 1,
-  иначе Flow по умолчанию печатает 2 ролика за прогон (= 10 кред вместо 5).
+* Outputs per prompt в настройках Flow НЕ трогаем — оставляем дефолтные 2 выхода
+  за Generate (это и есть «10 кред/видео»)
 
 Селекторы написаны через role/text-локаторы Playwright и заведомо чувствительны
 к редизайнам Google. При неудаче провайдер сохраняет скриншот страницы в
@@ -58,10 +58,9 @@ class FlowController:
       1. открывает labs.google/fx/tools/flow
       2. если нет активного проекта — создаёт «Fox2-clone»
       3. переключает таб (Видео / Изображения)
-      4. выставляет Outputs per prompt = 1 в Settings (экономим кредиты)
-      5. вводит промт, нажимает Create
-      6. ждёт появления нового результата в правой панели
-      7. скачивает файл в out_path
+      4. вводит промт, нажимает Create
+      5. ждёт появления новых результатов в правой панели
+      6. скачивает первый новый файл в out_path
     """
 
     PROJECT_NAME = "Fox2-clone"
@@ -335,7 +334,6 @@ class FlowImage(ImageProvider):
             ctrl.navigate()
             ctrl.ensure_project()
             ctrl.select_mode("image")
-            ctrl.set_outputs_per_prompt(1)
             count_before = ctrl.submit_prompt(prompt, timeout=DEFAULT_IMAGE_TIMEOUT)
             new_asset = ctrl.wait_for_new_asset(count_before, timeout=DEFAULT_IMAGE_TIMEOUT)
             ctrl.download_asset(new_asset, out_path, kind="image")
@@ -344,7 +342,7 @@ class FlowImage(ImageProvider):
 
 
 class FlowVideo(VideoProvider):
-    """Видео через Flow Veo (5 кред / видео при Outputs per prompt = 1)."""
+    """Видео через Flow Veo (10 кред / Generate при дефолтных 2 выходах)."""
 
     name = "flow_browser"
 
@@ -369,7 +367,6 @@ class FlowVideo(VideoProvider):
             ctrl.navigate()
             ctrl.ensure_project()
             ctrl.select_mode("video")
-            ctrl.set_outputs_per_prompt(1)
             # TODO: загрузить картинку как референс через «+ ingredient» когда селекторы
             #       будут понятны. Сейчас работаем чистым text-to-video.
             count_before = ctrl.submit_prompt(effective_prompt, timeout=DEFAULT_VIDEO_TIMEOUT)

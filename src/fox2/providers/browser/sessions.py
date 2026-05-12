@@ -107,9 +107,8 @@ def open_for_login(
 
 # Стандартные URL для входа.
 LOGIN_URLS: dict[str, str] = {
-    "flow": "https://labs.google/flow",
+    "flow": "https://labs.google/fx/tools/flow",
     "grok": "https://grok.com/",
-    "nano_banana": "https://gemini.google.com/app",
 }
 
 

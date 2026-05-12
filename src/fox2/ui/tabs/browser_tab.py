@@ -22,9 +22,8 @@ log = logging.getLogger("fox2.ui.browser")
 
 
 PROVIDER_LABEL: dict[str, str] = {
-    "flow": "Google Flow",
+    "flow": "Google Flow (Imagen / Veo / Nano Banana)",
     "grok": "Grok",
-    "nano_banana": "Nano Banana (Gemini)",
 }
 
 
@@ -56,7 +55,7 @@ class BrowserTab(ctk.CTkFrame):
         header = ctk.CTkFrame(card, fg_color="transparent")
         header.grid(row=0, column=0, sticky="ew", padx=12, pady=(10, 4))
         header.grid_columnconfigure(0, weight=1)
-        SectionTitle(header, "Аккаунты Flow / Grok / Nano Banana").grid(row=0, column=0, sticky="w")
+        SectionTitle(header, "Аккаунты Flow и Grok").grid(row=0, column=0, sticky="w")
         ctk.CTkButton(
             header, text="🔄 Сбросить кредиты", width=160, command=self._reset_credits
         ).grid(row=0, column=1, sticky="e")
