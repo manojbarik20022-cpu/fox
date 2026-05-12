@@ -1,0 +1,140 @@
+"""Smoke-тесты браузерных провайдеров и их регистрации в фабриках.
+
+Реально открывать Chromium и ходить в Flow/Grok/Gemini в этих тестах не нужно — это
+делать в живом GUI. Тут проверяем:
+
+* провайдеры импортируются без ошибок;
+* фабрика отдаёт нужный тип по имени;
+* если Playwright не установлен, фабрика поднимает ProviderError с понятным
+  сообщением (а не падает где-то в недрах);
+* AccountExhausted прорастает наружу из провайдера.
+"""
+from __future__ import annotations
+
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from fox2.core.settings import AppSettings
+from fox2.providers.base import ImageProvider, ProviderError, VideoProvider
+from fox2.providers.browser import AccountExhausted, BrowserAccountManager
+from fox2.providers.browser.flow import FlowImage, FlowVideo
+from fox2.providers.browser.grok import GrokImage, GrokVideo
+from fox2.providers.browser.nano_banana import NanoBananaImage
+from fox2.providers.image.factory import make_image_provider
+from fox2.providers.video.factory import make_video_provider
+
+
+class FactoryDispatchTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.settings = AppSettings()
+
+    def test_image_factory_returns_flow(self) -> None:
+        provider = make_image_provider("flow_browser", self.settings)
+        self.assertIsInstance(provider, FlowImage)
+        self.assertIsInstance(provider, ImageProvider)
+
+    def test_image_factory_returns_grok(self) -> None:
+        provider = make_image_provider("grok_browser", self.settings)
+        self.assertIsInstance(provider, GrokImage)
+
+    def test_image_factory_returns_nano_banana(self) -> None:
+        provider = make_image_provider("nano_banana", self.settings)
+        self.assertIsInstance(provider, NanoBananaImage)
+
+    def test_video_factory_returns_flow(self) -> None:
+        provider = make_video_provider("flow_browser", self.settings)
+        self.assertIsInstance(provider, FlowVideo)
+        self.assertIsInstance(provider, VideoProvider)
+
+    def test_video_factory_returns_grok(self) -> None:
+        provider = make_video_provider("grok_browser", self.settings)
+        self.assertIsInstance(provider, GrokVideo)
+
+
+class AccountExhaustionFlowTests(unittest.TestCase):
+    """Проверяем, что когда нет аккаунтов — провайдер падает понятным образом
+    (а не где-то на этапе Playwright)."""
+
+    def test_flow_image_raises_when_no_accounts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = BrowserAccountManager(root=Path(tmp))
+            provider = FlowImage(accounts=mgr)
+            with self.assertRaises(AccountExhausted):
+                provider.generate("test", Path(tmp) / "out.png")
+
+    def test_flow_video_raises_when_no_accounts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = BrowserAccountManager(root=Path(tmp))
+            provider = FlowVideo(accounts=mgr)
+            with self.assertRaises(AccountExhausted):
+                provider.animate(Path(tmp) / "fake.png", Path(tmp) / "out.mp4", prompt="x")
+
+    def test_grok_image_raises_when_no_accounts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = BrowserAccountManager(root=Path(tmp))
+            provider = GrokImage(accounts=mgr)
+            with self.assertRaises(AccountExhausted):
+                provider.generate("test", Path(tmp) / "out.png")
+
+    def test_flow_image_falls_through_to_video_provider(self) -> None:
+        """Если в Flow-аккаунте мало кредитов для видео (5), но достаточно для картинки (1),
+        то FlowImage отдаёт результат, а FlowVideo упирается в AccountExhausted."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = BrowserAccountManager(root=Path(tmp))
+            a = mgr.add("flow1", "flow")
+            # Оставим 2 кредита (хватит на картинку, но не на видео)
+            a.credits_used_today = 48
+            mgr.save()
+
+            # video должен упасть
+            video = FlowVideo(accounts=mgr)
+            with self.assertRaises(AccountExhausted):
+                video.animate(Path(tmp) / "fake.png", Path(tmp) / "out.mp4", prompt="x")
+
+            # image должен попытаться открыть браузер (упадёт уже на playwright,
+            # но проверим что acquire успешно прошёл)
+            image = FlowImage(accounts=mgr)
+            # Мокаем chromium_session, чтобы не открывать реальный браузер.
+            with patch("fox2.providers.browser.flow.chromium_session") as mock_session:
+                # Эмулируем, что мы заходим в контекст и ничего не делаем (FlowController
+                # сразу упадёт, но кредиты не списываются, потому что внутри будет ошибка).
+                mock_session.side_effect = RuntimeError("test-bypass")
+                with self.assertRaises(RuntimeError):
+                    image.generate("test", Path(tmp) / "out.png")
+                # acquire всё равно должен был выбрать аккаунт.
+                mock_session.assert_called_once()
+
+
+class FactoryUnknownProviderTests(unittest.TestCase):
+    def test_unknown_image_provider_raises(self) -> None:
+        with self.assertRaises(Exception) as ctx:
+            make_image_provider("midjourney_browser", AppSettings())
+        self.assertIn("Неизвестный", str(ctx.exception))
+
+    def test_unknown_video_provider_raises(self) -> None:
+        with self.assertRaises(Exception) as ctx:
+            make_video_provider("veo3_browser", AppSettings())
+        self.assertIn("Неизвестный", str(ctx.exception))
+
+
+class ProviderErrorWhenPlaywrightMissingTests(unittest.TestCase):
+    """Если playwright не установлен — фабрика должна поднять ProviderError,
+    а не уронить весь GUI с ImportError. Реализован lazy import в фабрике."""
+
+    def test_flow_lazy_import(self) -> None:
+        # Имитация: успешный import (он есть) — провайдер создаётся.
+        provider = make_image_provider("flow_browser", AppSettings())
+        self.assertIsNotNone(provider)
+
+    def test_lazy_import_failure_yields_provider_error(self) -> None:
+        # Сэмулируем отсутствие playwright/flow.py через patch.
+        with patch.dict(
+            "sys.modules", {"fox2.providers.browser.flow": None}
+        ), self.assertRaises(ProviderError):
+            make_image_provider("flow_browser", AppSettings())
+
+
+if __name__ == "__main__":
+    unittest.main()
