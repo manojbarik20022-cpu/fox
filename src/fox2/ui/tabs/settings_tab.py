@@ -4,7 +4,7 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from ..state import AppState
-from ..widgets import AccentButton, CardFrame, LabelRow, SectionTitle
+from ..widgets import AccentButton, CardFrame, LabelRow, PathPickerRow, SectionTitle
 
 
 class SettingsTab(ctk.CTkFrame):
@@ -26,18 +26,14 @@ class SettingsTab(ctk.CTkFrame):
         SectionTitle(card, "Общие").grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
 
         self.projects_root_var = ctk.StringVar(value=self.state.settings.projects_root)
-        LabelRow(
-            card,
-            "Папка проектов:",
-            ctk.CTkEntry(card, textvariable=self.projects_root_var),
-        ).grid(row=1, column=0, sticky="ew", padx=12)
+        PathPickerRow(card, "Папка проектов:", self.projects_root_var).grid(
+            row=1, column=0, sticky="ew", padx=12
+        )
 
         self.downloads_var = ctk.StringVar(value=self.state.settings.downloads_dir)
-        LabelRow(
-            card,
-            "Папка загрузок:",
-            ctk.CTkEntry(card, textvariable=self.downloads_var),
-        ).grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
+        PathPickerRow(card, "Папка загрузок:", self.downloads_var).grid(
+            row=2, column=0, sticky="ew", padx=12, pady=(0, 10)
+        )
 
         # Дефолтные провайдеры
         SectionTitle(card, "Провайдеры по умолчанию").grid(

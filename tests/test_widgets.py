@@ -83,5 +83,53 @@ class LabelRowLayoutTests(unittest.TestCase):
         self.assertEqual(entry.grid_info().get("in"), row)
 
 
+@unittest.skipUnless(DISPLAY_AVAILABLE, "Нужен X-дисплей (Tk требует DISPLAY)")
+class PathPickerRowTests(unittest.TestCase):
+    """PathPickerRow: подпись + поле + кнопка «📁», открывающая askdirectory."""
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        import customtkinter as ctk
+        cls.ctk = ctk
+        cls.root = ctk.CTk()
+        cls.root.withdraw()
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        cls.root.destroy()
+
+    def test_picker_writes_chosen_path_into_variable(self) -> None:
+        from unittest.mock import patch
+
+        from fox2.ui.widgets import PathPickerRow
+
+        var = self.ctk.StringVar(value="")
+        row = PathPickerRow(self.root, "Папка проектов:", var)
+        with patch("fox2.ui.widgets.filedialog.askdirectory", return_value="/tmp/picked"):
+            row._pick()
+        self.assertEqual(var.get(), "/tmp/picked")
+
+    def test_picker_cancel_preserves_current_value(self) -> None:
+        from unittest.mock import patch
+
+        from fox2.ui.widgets import PathPickerRow
+
+        var = self.ctk.StringVar(value="/existing/path")
+        row = PathPickerRow(self.root, "Папка:", var)
+        # askdirectory возвращает "" при отмене — значение не должно затереться.
+        with patch("fox2.ui.widgets.filedialog.askdirectory", return_value=""):
+            row._pick()
+        self.assertEqual(var.get(), "/existing/path")
+
+    def test_picker_has_three_visible_children(self) -> None:
+        """Лэйаут: label, entry и кнопка должны быть гридованы в одной строке."""
+        from fox2.ui.widgets import PathPickerRow
+
+        var = self.ctk.StringVar(value="")
+        row = PathPickerRow(self.root, "X:", var)
+        cols = sorted(int(c.grid_info()["column"]) for c in (row.label, row.entry, row.button))
+        self.assertEqual(cols, [0, 1, 2])
+
+
 if __name__ == "__main__":
     unittest.main()
