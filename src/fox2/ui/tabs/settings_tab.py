@@ -12,6 +12,12 @@ class SettingsTab(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.state = state
         self.grid_columnconfigure(0, weight=1)
+        # Скролл-область забирает всю высоту, кнопка сохранения всегда внизу.
+        self.grid_rowconfigure(0, weight=1)
+
+        self._scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._scroll.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        self._scroll.grid_columnconfigure(0, weight=1)
 
         self._build_general()
         self._build_keys()
@@ -19,7 +25,7 @@ class SettingsTab(ctk.CTkFrame):
         self._build_save_button()
 
     def _build_general(self) -> None:
-        card = CardFrame(self)
+        card = CardFrame(self._scroll)
         card.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
         card.grid_columnconfigure(0, weight=1)
 
@@ -81,7 +87,7 @@ class SettingsTab(ctk.CTkFrame):
         ).grid(row=7, column=0, sticky="ew", padx=12, pady=(0, 10))
 
     def _build_keys(self) -> None:
-        card = CardFrame(self)
+        card = CardFrame(self._scroll)
         card.grid(row=1, column=0, sticky="ew", padx=8, pady=4)
         card.grid_columnconfigure(0, weight=1)
 
@@ -132,7 +138,7 @@ class SettingsTab(ctk.CTkFrame):
         ).grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 10))
 
     def _build_local(self) -> None:
-        card = CardFrame(self)
+        card = CardFrame(self._scroll)
         card.grid(row=2, column=0, sticky="ew", padx=8, pady=4)
         card.grid_columnconfigure(0, weight=1)
 
@@ -164,8 +170,9 @@ class SettingsTab(ctk.CTkFrame):
         )
 
     def _build_save_button(self) -> None:
+        # Кнопка приколочена внизу вкладки (не в скролле), чтобы всегда была видна.
         AccentButton(self, text="💾 Сохранить настройки", command=self._save).grid(
-            row=99, column=0, sticky="ew", padx=8, pady=12
+            row=1, column=0, sticky="ew", padx=8, pady=(4, 8)
         )
 
     def _save(self) -> None:
