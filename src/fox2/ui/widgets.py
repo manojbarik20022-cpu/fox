@@ -9,7 +9,16 @@ from .theme import COLOR_ACCENT, COLOR_PANEL, COLOR_TEXT_DIM
 
 
 class LabelRow(ctk.CTkFrame):
-    """Горизонтальная строка: подпись слева, виджет справа."""
+    """Горизонтальная строка: подпись слева, виджет справа.
+
+    Виджет, переданный аргументом, обычно создан с тем же родителем, что и
+    сам ``LabelRow`` (типичная запись на месте вызова —
+    ``LabelRow(card, "...", ctk.CTkEntry(card, ...))``). Чтобы такой виджет
+    был корректно размещён внутри строки, используем ``in_=self`` и поднимаем
+    его поверх фона строки через ``tkraise()`` — иначе непрозрачный фон
+    родительского контейнера, который рисует ``CTkFrame`` с
+    ``fg_color="transparent"``, закрывает виджет.
+    """
 
     def __init__(
         self,
@@ -30,7 +39,11 @@ class LabelRow(ctk.CTkFrame):
         )
         self.label.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=4)
         self.widget = widget
-        self.widget.grid(row=0, column=1, sticky="ew", pady=4)
+        if widget.master is self:
+            self.widget.grid(row=0, column=1, sticky="ew", pady=4)
+        else:
+            self.widget.grid(row=0, column=1, sticky="ew", pady=4, in_=self)
+            self.widget.tkraise()
 
 
 class SectionTitle(ctk.CTkLabel):
