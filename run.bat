@@ -38,11 +38,28 @@ if not exist ".venv\Scripts\python.exe" (
     )
     echo [setup] Installing dependencies ^(may take a few minutes^) ...
     call ".venv\Scripts\python.exe" -m pip install --upgrade pip
-    call ".venv\Scripts\python.exe" -m pip install -e .
+    call ".venv\Scripts\python.exe" -m pip install -e ".[browser]"
     if errorlevel 1 (
         echo [ERROR] Dependency installation failed.
         pause
         exit /b 1
+    )
+)
+
+REM ---- Install Playwright Chromium (one-time, ~200MB) ----
+REM Marker file lets us skip this step on subsequent launches.
+if not exist ".venv\.playwright-chromium-installed" (
+    echo [setup] Installing Chromium for browser automation ^(Flow, Grok, Nano Banana^) ...
+    echo [setup] This is a one-time ~200MB download.
+    call ".venv\Scripts\python.exe" -m pip install -e ".[browser]" >nul 2>&1
+    call ".venv\Scripts\python.exe" -m playwright install chromium
+    if errorlevel 1 (
+        echo [WARNING] Chromium installation failed. Browser providers ^(Flow/Grok/Nano Banana^) will not work.
+        echo You can retry later with: .venv\Scripts\python.exe -m playwright install chromium
+        timeout /t 4 >nul
+    ) else (
+        type nul > ".venv\.playwright-chromium-installed"
+        echo [setup] Chromium installed.
     )
 )
 
