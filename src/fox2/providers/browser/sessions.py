@@ -62,10 +62,13 @@ if (originalQuery) {
 """
 
 # Аргументы Chromium, которые отключают automation-баннеры/флаги.
-# NB: НЕ передаём --disable-blink-features=AutomationControlled — Chrome 140+
-# внёс его в список «неподдерживаемых флагов» и показывает жёлтую полоску.
-# Скрытие navigator.webdriver делается через add_init_script (STEALTH_INIT_SCRIPT).
+# --disable-blink-features=AutomationControlled — ключевой стелс-флаг, без
+# которого Google login детектит автоматизацию (даже с init-script, который
+# подменяет navigator.webdriver). Chrome 140+ показывает из-за него жёлтую
+# полоску предупреждения — это known trade-off.
 STEALTH_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--disable-features=IsolateOrigins,site-per-process",
     "--no-default-browser-check",
     "--no-first-run",
 ]
