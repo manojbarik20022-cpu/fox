@@ -49,5 +49,12 @@ if [ ! -f ".venv/.playwright-chromium-installed" ]; then
     fi
 fi
 
+# ---- Ensure playwright-stealth is installed (cheap pip check) ----
+# Without it Google login detects automation and blocks the sign-in dialog.
+if ! ".venv/bin/python" -c "import playwright_stealth" >/dev/null 2>&1; then
+    echo "[setup] Installing playwright-stealth (stealth patches for Google login) ..."
+    ".venv/bin/python" -m pip install --quiet "playwright-stealth>=2.0.0" || true
+fi
+
 # ---- Launch GUI ----
 exec ".venv/bin/python" -m fox2

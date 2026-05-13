@@ -115,7 +115,27 @@ def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tu
     ctx = p.chromium.launch_persistent_context(**common_kwargs)
     log.info("Запущен Playwright Chromium")
 
-    # Скрываем navigator.webdriver и т. п. на всех будущих страницах.
+    # Применяем глубокие стелс-патчи через playwright-stealth (~20 evasions:
+    # WebGL vendor, audio context, navigator.permissions, sec-ch-ua, navigator.plugins,
+    # iframe contentWindow, chrome.runtime, и т. д.). Это куда серьёзнее, чем
+    # один init-script ниже.
+    try:
+        from playwright_stealth import Stealth  # type: ignore[import-not-found]
+
+        # chrome_runtime=False оставляем дефолт (включение ломает некоторые сайты),
+        # остальные evasions включены по умолчанию.
+        Stealth(
+            navigator_languages_override=("ru-RU", "ru"),
+            navigator_platform_override="Win32",
+            navigator_user_agent_override=DEFAULT_UA,
+        ).apply_stealth_sync(ctx)
+        log.info("playwright-stealth применён к контексту")
+    except ImportError:
+        log.warning("playwright-stealth не установлен — используем только базовый init-script")
+    except Exception as exc:
+        log.warning("playwright-stealth не применился: %s", exc)
+
+    # Дополнительный fallback-init-script (на случай если stealth недоступен).
     try:
         ctx.add_init_script(STEALTH_INIT_SCRIPT)
     except Exception as exc:
