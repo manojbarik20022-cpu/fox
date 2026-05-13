@@ -27,7 +27,28 @@ if [ ! -x ".venv/bin/python" ]; then
     python3 -m venv .venv
     echo "[setup] Installing dependencies (may take a few minutes) ..."
     ".venv/bin/python" -m pip install --upgrade pip
-    ".venv/bin/python" -m pip install -e .
+    ".venv/bin/python" -m pip install -e ".[browser]"
+fi
+
+# ---- Install Playwright Chromium (one-time, ~200MB) ----
+if [ ! -f ".venv/.playwright-chromium-installed" ]; then
+    echo "[setup] Installing Chromium for browser automation (Flow, Grok, Nano Banana) ..."
+    echo "[setup] This is a one-time ~200MB download."
+    ".venv/bin/python" -m pip install -e ".[browser]" >/dev/null 2>&1 || true
+    if ".venv/bin/python" -m playwright install chromium; then
+        touch ".venv/.playwright-chromium-installed"
+        echo "[setup] Chromium installed."
+    else
+        echo "[WARNING] Chromium installation failed. Browser providers (Flow/Grok/Nano Banana) will not work."
+        echo "You can retry later with: .venv/bin/python -m playwright install chromium"
+        sleep 3
+    fi
+fi
+
+# ---- Ensure stealth + cookie-import dependencies are installed ----
+if ! ".venv/bin/python" -c "import playwright_stealth, browser_cookie3" >/dev/null 2>&1; then
+    echo "[setup] Installing playwright-stealth and browser-cookie3 (Google login bypass) ..."
+    ".venv/bin/python" -m pip install --quiet "playwright-stealth>=2.0.0" "browser-cookie3>=0.20.0" || true
 fi
 
 # ---- Launch GUI ----

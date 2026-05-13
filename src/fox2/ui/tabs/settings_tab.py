@@ -4,7 +4,7 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from ..state import AppState
-from ..widgets import AccentButton, CardFrame, LabelRow, SectionTitle
+from ..widgets import AccentButton, CardFrame, LabelRow, PathPickerRow, SectionTitle
 
 
 class SettingsTab(ctk.CTkFrame):
@@ -12,6 +12,12 @@ class SettingsTab(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent")
         self.state = state
         self.grid_columnconfigure(0, weight=1)
+        # Скролл-область забирает всю высоту, кнопка сохранения всегда внизу.
+        self.grid_rowconfigure(0, weight=1)
+
+        self._scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
+        self._scroll.grid(row=0, column=0, sticky="nsew", padx=0, pady=0)
+        self._scroll.grid_columnconfigure(0, weight=1)
 
         self._build_general()
         self._build_keys()
@@ -19,25 +25,21 @@ class SettingsTab(ctk.CTkFrame):
         self._build_save_button()
 
     def _build_general(self) -> None:
-        card = CardFrame(self)
+        card = CardFrame(self._scroll)
         card.grid(row=0, column=0, sticky="ew", padx=8, pady=(8, 4))
         card.grid_columnconfigure(0, weight=1)
 
         SectionTitle(card, "Общие").grid(row=0, column=0, sticky="w", padx=12, pady=(10, 6))
 
         self.projects_root_var = ctk.StringVar(value=self.state.settings.projects_root)
-        LabelRow(
-            card,
-            "Папка проектов:",
-            ctk.CTkEntry(card, textvariable=self.projects_root_var),
-        ).grid(row=1, column=0, sticky="ew", padx=12)
+        PathPickerRow(card, "Папка проектов:", self.projects_root_var).grid(
+            row=1, column=0, sticky="ew", padx=12
+        )
 
         self.downloads_var = ctk.StringVar(value=self.state.settings.downloads_dir)
-        LabelRow(
-            card,
-            "Папка загрузок:",
-            ctk.CTkEntry(card, textvariable=self.downloads_var),
-        ).grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
+        PathPickerRow(card, "Папка загрузок:", self.downloads_var).grid(
+            row=2, column=0, sticky="ew", padx=12, pady=(0, 10)
+        )
 
         # Дефолтные провайдеры
         SectionTitle(card, "Провайдеры по умолчанию").grid(
@@ -85,7 +87,7 @@ class SettingsTab(ctk.CTkFrame):
         ).grid(row=7, column=0, sticky="ew", padx=12, pady=(0, 10))
 
     def _build_keys(self) -> None:
-        card = CardFrame(self)
+        card = CardFrame(self._scroll)
         card.grid(row=1, column=0, sticky="ew", padx=8, pady=4)
         card.grid_columnconfigure(0, weight=1)
 
@@ -136,7 +138,7 @@ class SettingsTab(ctk.CTkFrame):
         ).grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 10))
 
     def _build_local(self) -> None:
-        card = CardFrame(self)
+        card = CardFrame(self._scroll)
         card.grid(row=2, column=0, sticky="ew", padx=8, pady=4)
         card.grid_columnconfigure(0, weight=1)
 
@@ -168,8 +170,9 @@ class SettingsTab(ctk.CTkFrame):
         )
 
     def _build_save_button(self) -> None:
+        # Кнопка приколочена внизу вкладки (не в скролле), чтобы всегда была видна.
         AccentButton(self, text="💾 Сохранить настройки", command=self._save).grid(
-            row=99, column=0, sticky="ew", padx=8, pady=12
+            row=1, column=0, sticky="ew", padx=8, pady=(4, 8)
         )
 
     def _save(self) -> None:

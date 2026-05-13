@@ -38,12 +38,38 @@ if not exist ".venv\Scripts\python.exe" (
     )
     echo [setup] Installing dependencies ^(may take a few minutes^) ...
     call ".venv\Scripts\python.exe" -m pip install --upgrade pip
-    call ".venv\Scripts\python.exe" -m pip install -e .
+    call ".venv\Scripts\python.exe" -m pip install -e ".[browser]"
     if errorlevel 1 (
         echo [ERROR] Dependency installation failed.
         pause
         exit /b 1
     )
+)
+
+REM ---- Install Playwright Chromium (one-time, ~200MB) ----
+REM Marker file lets us skip this step on subsequent launches.
+if not exist ".venv\.playwright-chromium-installed" (
+    echo [setup] Installing Chromium for browser automation ^(Flow, Grok, Nano Banana^) ...
+    echo [setup] This is a one-time ~200MB download.
+    call ".venv\Scripts\python.exe" -m pip install -e ".[browser]" >nul 2>&1
+    call ".venv\Scripts\python.exe" -m playwright install chromium
+    if errorlevel 1 (
+        echo [WARNING] Chromium installation failed. Browser providers ^(Flow/Grok/Nano Banana^) will not work.
+        echo You can retry later with: .venv\Scripts\python.exe -m playwright install chromium
+        timeout /t 4 >nul
+    ) else (
+        type nul > ".venv\.playwright-chromium-installed"
+        echo [setup] Chromium installed.
+    )
+)
+
+REM ---- Ensure stealth + cookie-import dependencies are installed (cheap, no-op if already there) ----
+REM playwright-stealth: stealth patches for Google login.
+REM browser-cookie3: import session cookies from user's regular Chrome/Edge/Firefox.
+call ".venv\Scripts\python.exe" -c "import playwright_stealth, browser_cookie3" >nul 2>&1
+if errorlevel 1 (
+    echo [setup] Installing playwright-stealth and browser-cookie3 ^(Google login bypass^) ...
+    call ".venv\Scripts\python.exe" -m pip install --quiet "playwright-stealth>=2.0.0" "browser-cookie3>=0.20.0"
 )
 
 REM ---- Launch GUI ----
