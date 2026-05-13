@@ -19,9 +19,14 @@ from .accounts import (
 from .coordinates import CoordinateAutomator
 from .profiles import BrowserProfileManager
 from .sessions import (
+    GOOGLE_COOKIE_DOMAINS,
+    GROK_COOKIE_DOMAINS,
     LOGIN_URLS,
+    SUPPORTED_BROWSERS,
+    CookieImportError,
     PlaywrightUnavailable,
     chromium_session,
+    import_cookies_into_profile,
     login_url_for,
     open_for_login,
 )
@@ -29,14 +34,19 @@ from .sessions import (
 __all__ = [
     "COST",
     "DAILY_LIMITS",
+    "GOOGLE_COOKIE_DOMAINS",
+    "GROK_COOKIE_DOMAINS",
     "LOGIN_URLS",
+    "SUPPORTED_BROWSERS",
     "AccountExhausted",
     "BrowserAccount",
     "BrowserAccountManager",
     "BrowserProfileManager",
+    "CookieImportError",
     "CoordinateAutomator",
     "PlaywrightUnavailable",
     "chromium_session",
+    "import_cookies_into_profile",
     "login_url_for",
     "open_for_login",
 ]

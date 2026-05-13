@@ -28,7 +28,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-browser = ["playwright>=1.45.0", "playwright-stealth>=2.0.0"]
+browser = ["playwright>=1.45.0", "playwright-stealth>=2.0.0", "browser-cookie3>=0.20.0"]
 local-llm = ["ollama>=0.3.0"]
 elevenlabs = ["elevenlabs>=1.0.0"]
 openai = ["openai>=1.30.0"]
@@ -37,6 +37,7 @@ gemini = ["google-generativeai>=0.7.0"]
 all = [
     "playwright>=1.45.0",
     "playwright-stealth>=2.0.0",
+    "browser-cookie3>=0.20.0",
     "ollama>=0.3.0",
     "elevenlabs>=1.0.0",
     "openai>=1.30.0",

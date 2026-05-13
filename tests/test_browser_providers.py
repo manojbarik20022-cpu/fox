@@ -152,5 +152,81 @@ class ProviderErrorWhenPlaywrightMissingTests(unittest.TestCase):
             make_image_provider("flow_browser", AppSettings())
 
 
+class CookieImportTests(unittest.TestCase):
+    """Тесты для импорта cookies из обычного браузера (план В обхода Google login)."""
+
+    def test_convert_cookie_basic(self) -> None:
+        from http.cookiejar import Cookie
+
+        from fox2.providers.browser.sessions import _convert_cookie
+
+        c = Cookie(
+            version=0,
+            name="SID",
+            value="abc123",
+            port=None,
+            port_specified=False,
+            domain=".google.com",
+            domain_specified=True,
+            domain_initial_dot=True,
+            path="/",
+            path_specified=True,
+            secure=True,
+            expires=1700000000,
+            discard=False,
+            comment=None,
+            comment_url=None,
+            rest={"HttpOnly": "", "SameSite": "Lax"},
+            rfc2109=False,
+        )
+        result = _convert_cookie(c)
+        self.assertEqual(result["name"], "SID")
+        self.assertEqual(result["value"], "abc123")
+        self.assertEqual(result["domain"], ".google.com")
+        self.assertEqual(result["path"], "/")
+        self.assertTrue(result["secure"])
+        self.assertTrue(result["httpOnly"])
+        self.assertEqual(result["sameSite"], "Lax")
+        self.assertEqual(result["expires"], 1700000000.0)
+
+    def test_convert_cookie_session_cookie(self) -> None:
+        """Cookie без expires (session-only) должна получить -1."""
+        from http.cookiejar import Cookie
+
+        from fox2.providers.browser.sessions import _convert_cookie
+
+        c = Cookie(
+            version=0, name="X", value="y", port=None, port_specified=False,
+            domain=".x.com", domain_specified=True, domain_initial_dot=True,
+            path="/", path_specified=True, secure=False, expires=None,
+            discard=True, comment=None, comment_url=None, rest={}, rfc2109=False,
+        )
+        result = _convert_cookie(c)
+        self.assertEqual(result["expires"], -1.0)
+        self.assertFalse(result["secure"])
+        self.assertFalse(result["httpOnly"])
+        self.assertEqual(result["sameSite"], "Lax")  # default
+
+    def test_load_browser_cookies_unknown_browser(self) -> None:
+        from fox2.providers.browser import CookieImportError
+        from fox2.providers.browser.sessions import _load_browser_cookies
+
+        with self.assertRaises(CookieImportError) as ctx:
+            _load_browser_cookies("safari-12-banana")
+        self.assertIn("Неизвестный браузер", str(ctx.exception))
+
+    def test_load_browser_cookies_propagates_loader_error(self) -> None:
+        """Если browser_cookie3 падает (например, нет такого браузера на машине) —
+        мы оборачиваем в CookieImportError с понятным сообщением."""
+        from fox2.providers.browser import CookieImportError
+        from fox2.providers.browser.sessions import _load_browser_cookies
+
+        with patch("browser_cookie3.chrome", side_effect=RuntimeError("no chrome on disk")):
+            with self.assertRaises(CookieImportError) as ctx:
+                _load_browser_cookies("chrome", domains=(".google.com",))
+            self.assertIn("Закрой все окна", str(ctx.exception))
+            self.assertIn("no chrome on disk", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

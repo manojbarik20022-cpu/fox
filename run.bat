@@ -63,12 +63,13 @@ if not exist ".venv\.playwright-chromium-installed" (
     )
 )
 
-REM ---- Ensure playwright-stealth is installed (cheap pip check, no-op if already there) ----
-REM Without it Google login detects automation and blocks the sign-in dialog.
-call ".venv\Scripts\python.exe" -c "import playwright_stealth" >nul 2>&1
+REM ---- Ensure stealth + cookie-import dependencies are installed (cheap, no-op if already there) ----
+REM playwright-stealth: stealth patches for Google login.
+REM browser-cookie3: import session cookies from user's regular Chrome/Edge/Firefox.
+call ".venv\Scripts\python.exe" -c "import playwright_stealth, browser_cookie3" >nul 2>&1
 if errorlevel 1 (
-    echo [setup] Installing playwright-stealth ^(stealth patches for Google login^) ...
-    call ".venv\Scripts\python.exe" -m pip install --quiet "playwright-stealth>=2.0.0"
+    echo [setup] Installing playwright-stealth and browser-cookie3 ^(Google login bypass^) ...
+    call ".venv\Scripts\python.exe" -m pip install --quiet "playwright-stealth>=2.0.0" "browser-cookie3>=0.20.0"
 )
 
 REM ---- Launch GUI ----

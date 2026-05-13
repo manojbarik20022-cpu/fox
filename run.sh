@@ -45,11 +45,10 @@ if [ ! -f ".venv/.playwright-chromium-installed" ]; then
     fi
 fi
 
-# ---- Ensure playwright-stealth is installed (cheap pip check) ----
-# Without it Google login detects automation and blocks the sign-in dialog.
-if ! ".venv/bin/python" -c "import playwright_stealth" >/dev/null 2>&1; then
-    echo "[setup] Installing playwright-stealth (stealth patches for Google login) ..."
-    ".venv/bin/python" -m pip install --quiet "playwright-stealth>=2.0.0" || true
+# ---- Ensure stealth + cookie-import dependencies are installed ----
+if ! ".venv/bin/python" -c "import playwright_stealth, browser_cookie3" >/dev/null 2>&1; then
+    echo "[setup] Installing playwright-stealth and browser-cookie3 (Google login bypass) ..."
+    ".venv/bin/python" -m pip install --quiet "playwright-stealth>=2.0.0" "browser-cookie3>=0.20.0" || true
 fi
 
 # ---- Launch GUI ----

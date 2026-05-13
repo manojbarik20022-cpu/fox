@@ -2,15 +2,21 @@
 from __future__ import annotations
 
 import logging
+import threading
 
 import customtkinter as ctk
 
 from ...core.settings import CoordinateProfile
 from ...providers.browser import (
     DAILY_LIMITS,
+    GOOGLE_COOKIE_DOMAINS,
+    GROK_COOKIE_DOMAINS,
+    SUPPORTED_BROWSERS,
     BrowserAccountManager,
+    CookieImportError,
     CoordinateAutomator,
     PlaywrightUnavailable,
+    import_cookies_into_profile,
     login_url_for,
     open_for_login,
 )
@@ -44,6 +50,7 @@ class BrowserTab(ctk.CTkFrame):
 
         self._build_accounts()
         self._build_add_account()
+        self._build_cookie_import()
         self._build_coordinates()
 
     # ---------------- accounts ----------------
@@ -219,10 +226,117 @@ class BrowserTab(ctk.CTkFrame):
     def _set_add_status(self, text: str) -> None:
         self.add_status.configure(text=text)
 
+    # ---------------- cookie import (plan В: bypass Google login) ----------------
+    def _build_cookie_import(self) -> None:
+        card = CardFrame(self._scroll)
+        card.grid(row=2, column=0, sticky="ew", padx=8, pady=4)
+        card.grid_columnconfigure(0, weight=1)
+
+        SectionTitle(card, "Импорт входа из обычного браузера").grid(
+            row=0, column=0, sticky="w", padx=12, pady=(10, 4)
+        )
+
+        ctk.CTkLabel(
+            card,
+            text=(
+                "Если Google блокирует логин в Playwright-Chromium, импортируй cookies\n"
+                "из своего обычного браузера. ВАЖНО: закрой все окна этого браузера\n"
+                "перед импортом — иначе SQLite-файл cookies заблокирован."
+            ),
+            anchor="w",
+            justify="left",
+            text_color=COLOR_TEXT_DIM,
+        ).grid(row=1, column=0, sticky="w", padx=12, pady=(0, 6))
+
+        self.import_account_var = ctk.StringVar(value="")
+        LabelRow(
+            card,
+            "В аккаунт:",
+            ctk.CTkEntry(card, textvariable=self.import_account_var, placeholder_text="имя аккаунта"),
+        ).grid(row=2, column=0, sticky="ew", padx=12)
+
+        self.import_browser_var = ctk.StringVar(value="chrome")
+        LabelRow(
+            card,
+            "Из браузера:",
+            ctk.CTkOptionMenu(
+                card,
+                variable=self.import_browser_var,
+                values=list(SUPPORTED_BROWSERS),
+            ),
+        ).grid(row=3, column=0, sticky="ew", padx=12)
+
+        self.import_cookie_file_var = ctk.StringVar(value="")
+        LabelRow(
+            card,
+            "Файл cookies (для Chrome Portable):",
+            ctk.CTkEntry(
+                card,
+                textvariable=self.import_cookie_file_var,
+                placeholder_text="необязательно: путь к Cookies SQLite",
+            ),
+        ).grid(row=4, column=0, sticky="ew", padx=12)
+
+        AccentButton(card, text="🔓 Импортировать cookies", command=self._import_cookies).grid(
+            row=5, column=0, sticky="ew", padx=12, pady=(8, 4)
+        )
+        self.import_status = ctk.CTkLabel(card, text="", anchor="w", justify="left")
+        self.import_status.grid(row=6, column=0, sticky="ew", padx=12, pady=(0, 10))
+
+    def _import_cookies(self) -> None:
+        name = self.import_account_var.get().strip()
+        browser = self.import_browser_var.get()
+        cookie_file = self.import_cookie_file_var.get().strip() or None
+        if not name:
+            self._set_import_status("Введи имя аккаунта (из таблицы выше).")
+            return
+        account = self.accounts.get(name)
+        if not account:
+            self._set_import_status(
+                f"Аккаунт «{name}» не найден. Сначала добавь его в таблице выше ("
+                "кнопка «➕ Добавить и войти» — но не входи, просто создай)."
+            )
+            return
+        provider = account.provider
+        domains = GOOGLE_COOKIE_DOMAINS if provider != "grok" else GROK_COOKIE_DOMAINS
+        self._set_import_status(
+            f"Импортирую cookies из {browser} для {name} (домены {domains})…"
+        )
+
+        def _worker() -> None:
+            try:
+                n = import_cookies_into_profile(
+                    account.profile_dir,
+                    browser=browser,
+                    cookie_file=cookie_file,
+                    domains=domains,
+                )
+            except CookieImportError as exc:
+                msg = f"Ошибка: {exc}"
+                self.after(0, lambda m=msg: self._set_import_status(m))
+            except PlaywrightUnavailable as exc:
+                msg = f"Ошибка: {exc}\nПерезапусти run.bat — он доставит Chromium."
+                self.after(0, lambda m=msg: self._set_import_status(m))
+            except Exception as exc:
+                log.exception("Неожиданная ошибка при импорте cookies")
+                msg = f"Ошибка: {exc}"
+                self.after(0, lambda m=msg: self._set_import_status(m))
+            else:
+                msg = (
+                    f"Готово: импортировано {n} cookies в {name}. "
+                    f"Теперь можно прогонять задачу через {provider}."
+                )
+                self.after(0, lambda m=msg: self._set_import_status(m))
+
+        threading.Thread(target=_worker, daemon=True, name="fox2-cookie-import").start()
+
+    def _set_import_status(self, text: str) -> None:
+        self.import_status.configure(text=text)
+
     # ---------------- coordinates (legacy Fox2) ----------------
     def _build_coordinates(self) -> None:
         card = CardFrame(self._scroll)
-        card.grid(row=2, column=0, sticky="ew", padx=8, pady=4)
+        card.grid(row=3, column=0, sticky="ew", padx=8, pady=4)
         card.grid_columnconfigure(0, weight=1)
 
         SectionTitle(card, "Координаты кликов (как в Fox2)").grid(

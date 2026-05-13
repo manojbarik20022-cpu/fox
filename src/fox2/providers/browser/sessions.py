@@ -172,6 +172,135 @@ def chromium_session(
                 log.debug("ctx.close() ignored: %s", exc)
 
 
+# ---- Импорт cookies из обычного браузера (план В, если Google login заблокирован) ----
+
+# Список поддерживаемых браузеров и их функции-загрузчики из browser_cookie3.
+SUPPORTED_BROWSERS = ("chrome", "edge", "brave", "opera", "chromium", "vivaldi", "firefox")
+
+# Домены, которые нужны для Flow/Grok/Gemini.
+GOOGLE_COOKIE_DOMAINS = (
+    ".google.com",
+    ".labs.google",
+    ".accounts.google.com",
+)
+GROK_COOKIE_DOMAINS = (".grok.com", ".x.ai", ".x.com")
+
+
+class CookieImportError(RuntimeError):
+    """Ошибка при импорте cookies из обычного браузера."""
+
+
+def _convert_cookie(c: Any) -> dict[str, Any]:
+    """``http.cookiejar.Cookie`` → формат Playwright ``add_cookies``."""
+    same_site = "Lax"
+    rest = getattr(c, "_rest", None) or {}
+    raw_ss = rest.get("SameSite") or rest.get("sameSite")
+    if isinstance(raw_ss, str):
+        normalized = raw_ss.capitalize()
+        if normalized in ("Strict", "Lax", "None"):
+            same_site = normalized
+
+    expires = c.expires if c.expires else -1
+    # browser_cookie3 ставит rest={"HttpOnly": ""} (пустая строка) когда флаг включён,
+    # и {} когда выключен. Поэтому проверяем именно наличие ключа, не значение.
+    http_only = "HttpOnly" in rest or "httpOnly" in rest
+    return {
+        "name": c.name,
+        "value": c.value or "",
+        "domain": c.domain,
+        "path": c.path or "/",
+        "expires": float(expires),
+        "httpOnly": http_only,
+        "secure": bool(c.secure),
+        "sameSite": same_site,
+    }
+
+
+def _load_browser_cookies(
+    browser: str,
+    *,
+    cookie_file: str | None = None,
+    domains: tuple[str, ...] | None = None,
+) -> list[dict[str, Any]]:
+    """Прочитать cookies из обычного браузера через browser_cookie3."""
+    try:
+        import browser_cookie3  # type: ignore[import-not-found]
+    except ImportError as exc:
+        raise CookieImportError(
+            "Модуль browser_cookie3 не установлен. Перезапусти run.bat — "
+            "он его дотянет, либо вручную: pip install browser-cookie3"
+        ) from exc
+
+    browser = browser.lower()
+    if browser not in SUPPORTED_BROWSERS:
+        raise CookieImportError(f"Неизвестный браузер: {browser}")
+
+    loader = getattr(browser_cookie3, browser, None)
+    if loader is None:
+        raise CookieImportError(f"browser_cookie3 не поддерживает {browser}")
+
+    domains = domains or ("",)  # пустая строка = все домены
+    seen: set[tuple[str, str, str]] = set()
+    cookies: list[dict[str, Any]] = []
+    for domain in domains:
+        try:
+            cj = loader(cookie_file=cookie_file, domain_name=domain)
+        except Exception as exc:
+            raise CookieImportError(
+                f"Не удалось прочитать cookies из {browser} "
+                f"(домен {domain or '*'}): {exc}. "
+                "Закрой все окна браузера перед импортом."
+            ) from exc
+        for c in cj:
+            key = (c.name, c.domain, c.path or "/")
+            if key in seen:
+                continue
+            seen.add(key)
+            try:
+                cookies.append(_convert_cookie(c))
+            except Exception as exc:
+                log.debug("пропускаем cookie %s: %s", c.name, exc)
+    return cookies
+
+
+def import_cookies_into_profile(
+    profile_dir: str | Path,
+    *,
+    browser: str = "chrome",
+    cookie_file: str | None = None,
+    domains: tuple[str, ...] | None = None,
+) -> int:
+    """Импортирует Google/Grok cookies из обычного браузера в Playwright-профиль.
+
+    Возвращает количество импортированных cookies. После успешного импорта
+    Playwright-профиль будет считать пользователя залогиненным — никакая
+    страница входа Google не понадобится.
+
+    ``browser`` — chrome/edge/brave/opera/chromium/vivaldi/firefox.
+    ``cookie_file`` — кастомный путь к SQLite-файлу cookies (для Chrome Portable
+    указать ``<portable>/Data/profile/Default/Cookies`` или ``...Network/Cookies``).
+    ``domains`` — кортеж доменов (по умолчанию Google + labs.google).
+    """
+    if domains is None:
+        domains = GOOGLE_COOKIE_DOMAINS
+
+    cookies = _load_browser_cookies(browser, cookie_file=cookie_file, domains=domains)
+    if not cookies:
+        raise CookieImportError(
+            f"В {browser} не нашлось ни одной cookie для доменов {domains}. "
+            "Проверь, что ты залогинен в Google в этом браузере."
+        )
+
+    profile_dir = Path(profile_dir)
+    ensure_dir(profile_dir)
+    # Через headless-сессию Playwright проставляем cookies в persistent профиль.
+    # На закрытии context'а cookies сохраняются в user_data_dir/Default/Cookies.
+    with chromium_session(profile_dir, headless=True) as (ctx, _page):
+        ctx.add_cookies(cookies)  # type: ignore[arg-type]
+    log.info("Импортировано %d cookies из %s в %s", len(cookies), browser, profile_dir)
+    return len(cookies)
+
+
 def open_for_login(
     profile_dir: str | Path,
     login_url: str,
