@@ -6,19 +6,19 @@ Flow/Grok/Nano Banana (фоновая автоматизация под уже �
 Google детектирует «обычный» Playwright-Chromium и блокирует вход с ошибкой
 «Этот браузер или приложение небезопасны». Чтобы обойти:
 
-1. **Сначала пробуем системный Google Chrome** (``channel="chrome"``) — Google
-   к нему не придирается. Если не установлен — fallback на bundled Chromium.
-2. **Стелс-флаги** на bundled Chromium: отключаем ``--enable-automation``,
-   убираем ``navigator.webdriver``, ставим обычный user-agent.
+* Подменяем user-agent на реальный Chrome на Windows.
+* Прячем ``navigator.webdriver`` и бренд-стринг «Chrome for Testing»
+  в ``navigator.userAgentData.brands`` через init-script.
+* Отключаем automation-флаги в ``ignore_default_args``.
 
-Этого достаточно для прохождения Google login без перехода на полноценный
-``playwright-stealth``.
+НАСТОЯЩИЙ Google Chrome из Program Files НЕ используем — Chrome
+использует single-instance behaviour, и если у пользователя уже открыт обычный
+Chrome, Playwright не может подключиться по CDP к новому процессу
+(github.com/microsoft/playwright/issues/18046).
 """
 from __future__ import annotations
 
 import logging
-import os
-import platform
 import threading
 import time
 from collections.abc import Callable
@@ -40,8 +40,8 @@ DEFAULT_UA = (
 )
 
 # Скрипт, который выполняется ДО первого скрипта на странице.
-# Прячет navigator.webdriver и навешивает «человеческие» свойства, по которым
-# Google детектит автоматизацию.
+# Прячет navigator.webdriver, подменяет «Chrome for Testing»-бренд в userAgentData
+# на обычный Google Chrome и навешивает «человеческие» свойства.
 STEALTH_INIT_SCRIPT = r"""
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
@@ -55,6 +55,46 @@ if (originalQuery) {
             : originalQuery(parameters)
     );
 }
+
+// Подменяем navigator.userAgentData, чтобы сайты не видели «Chrome for Testing».
+// Это основной сигнал, по которому Google login отличает бундл Playwright.
+try {
+    const fakeBrands = [
+        { brand: 'Google Chrome', version: '131' },
+        { brand: 'Chromium', version: '131' },
+        { brand: 'Not?A_Brand', version: '24' }
+    ];
+    const fakeHighEntropy = {
+        brands: fakeBrands,
+        mobile: false,
+        platform: 'Windows',
+        platformVersion: '15.0.0',
+        architecture: 'x86',
+        bitness: '64',
+        model: '',
+        uaFullVersion: '131.0.6778.108',
+        fullVersionList: [
+            { brand: 'Google Chrome', version: '131.0.6778.108' },
+            { brand: 'Chromium', version: '131.0.6778.108' },
+            { brand: 'Not?A_Brand', version: '24.0.0.0' }
+        ],
+        wow64: false
+    };
+    Object.defineProperty(navigator, 'userAgentData', {
+        configurable: true,
+        get: () => ({
+            brands: fakeBrands,
+            mobile: false,
+            platform: 'Windows',
+            getHighEntropyValues: () => Promise.resolve(fakeHighEntropy),
+            toJSON: () => ({
+                brands: fakeBrands,
+                mobile: false,
+                platform: 'Windows'
+            })
+        })
+    });
+} catch (e) { /* userAgentData недоступен — ничего не делаем */ }
 """
 
 # Аргументы Chromium, которые отключают automation-баннеры/флаги.
@@ -65,39 +105,6 @@ STEALTH_ARGS = [
     "--no-default-browser-check",
     "--no-first-run",
 ]
-
-
-def _find_system_chrome() -> str | None:
-    """Найти настоящий, установленный пользователем Google Chrome.
-
-    Playwright-овский ``channel="chrome"`` скачивает свой *Chrome for Testing* —
-    это другой бинарник, отдельный от обычного Chrome. Сайты вроде Flow его
-    отличают (например, по бренд-стрингу «Chrome for Testing»). Поэтому ищем
-    обычный Chrome в стандартных местах установки.
-    """
-    system = platform.system()
-    candidates: list[str] = []
-    if system == "Windows":
-        for env_var in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
-            base = os.environ.get(env_var)
-            if base:
-                candidates.append(str(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe"))
-    elif system == "Darwin":
-        candidates = [
-            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-            str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
-        ]
-    else:  # Linux
-        candidates = [
-            "/usr/bin/google-chrome",
-            "/usr/bin/google-chrome-stable",
-            "/snap/bin/google-chrome",
-            "/opt/google/chrome/google-chrome",
-        ]
-    for c in candidates:
-        if c and Path(c).is_file():
-            return c
-    return None
 
 
 class PlaywrightUnavailable(RuntimeError):
@@ -116,11 +123,7 @@ def _import_playwright() -> Any:
 
 
 def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tuple[int, int]) -> Any:
-    """Запустить настоящий системный Chrome, при неудаче — bundled Chromium со стелс-флагами.
-
-    В обоих случаях навешивает stealth init-script + реалистичный user-agent +
-    отключает automation-флаги.
-    """
+    """Запустить bundled Playwright-Chromium с навешенными стелс-флагами и init-script."""
     common_kwargs = {
         "user_data_dir": profile_dir,
         "headless": headless,
@@ -134,23 +137,13 @@ def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tu
         "ignore_default_args": ["--enable-automation", "--no-sandbox"],
     }
 
-    ctx = None
-    # 1. Настоящий Google Chrome из Program Files (не Chrome for Testing).
-    chrome_path = _find_system_chrome()
-    if chrome_path:
-        try:
-            ctx = p.chromium.launch_persistent_context(
-                executable_path=chrome_path, **common_kwargs
-            )
-            log.info("Запущен системный Google Chrome: %s", chrome_path)
-        except Exception as exc:
-            log.info("Системный Chrome (%s) не запустился (%s) — пробуем fallback", chrome_path, exc)
-            ctx = None
-
-    # 2. Fallback: bundled Chromium со стелс-флагами.
-    if ctx is None:
-        ctx = p.chromium.launch_persistent_context(**common_kwargs)
-        log.info("Запущен bundled Chromium (системный Chrome не найден)")
+    # Запускаем bundled Chromium (брендирован как «Chrome for Testing» на странице about:).
+    # Системный Chrome из Program Files НЕ используем: если пользователь уже
+    # запустил обычный Chrome, Playwright не может подключиться по CDP к новому
+    # процессу (Chrome отдаёт single-instance lock уже запущенному).
+    # Детали: github.com/microsoft/playwright/issues/18046
+    ctx = p.chromium.launch_persistent_context(**common_kwargs)
+    log.info("Запущен Playwright Chromium")
 
     # Скрываем navigator.webdriver и т. п. на всех будущих страницах.
     try:
