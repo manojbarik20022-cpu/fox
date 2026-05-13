@@ -92,7 +92,10 @@ def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tu
         "accept_downloads": True,
         "user_agent": DEFAULT_UA,
         "args": STEALTH_ARGS,
-        "ignore_default_args": ["--enable-automation"],
+        # Playwright по умолчанию добавляет --enable-automation (палит автоматизацию)
+        # и --no-sandbox (Chrome показывает «неподдерживаемый флаг» жёлтой полоской).
+        # Убираем оба.
+        "ignore_default_args": ["--enable-automation", "--no-sandbox"],
     }
 
     # 1. Попытка: системный Google Chrome.
