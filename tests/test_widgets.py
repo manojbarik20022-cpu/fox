@@ -83,6 +83,55 @@ class LabelRowLayoutTests(unittest.TestCase):
         self.assertEqual(entry.grid_info().get("in"), row)
 
 
+class ClipboardKeycodeHandlerTests(unittest.TestCase):
+    """Регрессия: на английской раскладке Ctrl+V должен идти стандартным
+    путём (один paste), а наш keycode-handler — пропускать событие, иначе
+    будет двойная вставка."""
+
+    def test_latin_keysym_returns_none(self) -> None:
+        from fox2.ui.widgets import _NATIVE_LATIN_KEYSYMS, _on_ctrl_keypress
+
+        # Должны быть все мнемоники Ctrl+V/C/X/A/Z в обоих регистрах.
+        self.assertIn("v", _NATIVE_LATIN_KEYSYMS)
+        self.assertIn("V", _NATIVE_LATIN_KEYSYMS)
+        self.assertIn("c", _NATIVE_LATIN_KEYSYMS)
+        self.assertIn("a", _NATIVE_LATIN_KEYSYMS)
+
+        # Эмулируем событие на английской раскладке с keysym="v".
+        class FakeEvent:
+            keycode = 86  # VK_V
+            keysym = "v"
+
+            class widget:
+                @staticmethod
+                def winfo_class() -> str:
+                    return "Entry"
+
+        result = _on_ctrl_keypress(FakeEvent())  # type: ignore[arg-type]
+        self.assertIsNone(result, "Latin keysym must be skipped (default handles it)")
+
+    def test_cyrillic_keysym_triggers_handler(self) -> None:
+        """На русской раскладке keysym будет «Cyrillic_em», и handler должен сработать."""
+        from unittest.mock import patch
+
+        from fox2.ui.widgets import _on_ctrl_keypress
+
+        class FakeEvent:
+            keycode = 86  # VK_V (та же физическая клавиша)
+            keysym = "Cyrillic_em"  # м на русской раскладке
+
+            class widget:
+                @staticmethod
+                def winfo_class() -> str:
+                    return "Entry"
+
+        with patch("fox2.ui.widgets._dispatch_clipboard") as mock_dispatch:
+            result = _on_ctrl_keypress(FakeEvent())  # type: ignore[arg-type]
+        self.assertEqual(result, "break", "Cyrillic keysym must invoke handler")
+        mock_dispatch.assert_called_once()
+        self.assertEqual(mock_dispatch.call_args[0][1], "paste")
+
+
 @unittest.skipUnless(DISPLAY_AVAILABLE, "Нужен X-дисплей (Tk требует DISPLAY)")
 class PathPickerRowTests(unittest.TestCase):
     """PathPickerRow: подпись + поле + кнопка «📁», открывающая askdirectory."""

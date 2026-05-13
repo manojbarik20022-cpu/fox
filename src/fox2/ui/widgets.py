@@ -28,6 +28,10 @@ _CTRL_KEYCODES = {
 
 _TEXT_WIDGET_CLASSES = ("Entry", "TEntry", "Text", "Spinbox", "TCombobox")
 
+# Latin keysyms, которые стандартный Tkinter уже ловит как Ctrl+V/C/X/A/Z.
+# Если keysym из этого набора — НЕ запускаем наш handler, иначе будет двойная вставка.
+_NATIVE_LATIN_KEYSYMS = frozenset({"v", "V", "c", "C", "x", "X", "a", "A", "z", "Z"})
+
 
 def _is_text_widget(widget: tk.Misc | None) -> bool:
     if widget is None:
@@ -70,6 +74,11 @@ def _dispatch_clipboard(widget: tk.Misc, action: str) -> None:
 def _on_ctrl_keypress(event: tk.Event) -> str | None:
     action = _CTRL_KEYCODES.get(event.keycode)
     if action is None or not _is_text_widget(event.widget):
+        return None
+    # На английской раскладке Ctrl+V/C/X/A/Z уже обработан стандартным
+    # биндингом Tkinter — наш handler не нужен, иначе вставка дважды.
+    # На русской раскладке keysym будет «Cyrillic_em» или похожее — пропустим.
+    if event.keysym in _NATIVE_LATIN_KEYSYMS:
         return None
     _dispatch_clipboard(event.widget, action)
     return "break"
