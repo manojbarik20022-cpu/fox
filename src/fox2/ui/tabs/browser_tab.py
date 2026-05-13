@@ -269,11 +269,11 @@ class BrowserTab(ctk.CTkFrame):
         self.import_cookie_file_var = ctk.StringVar(value="")
         LabelRow(
             card,
-            "Файл cookies (для Chrome Portable):",
+            "Путь к Chrome Portable:",
             ctk.CTkEntry(
                 card,
                 textvariable=self.import_cookie_file_var,
-                placeholder_text="необязательно: путь к Cookies SQLite",
+                placeholder_text="необязательно: папка портативного Chrome (или SQLite Cookies)",
             ),
         ).grid(row=4, column=0, sticky="ew", padx=12)
 

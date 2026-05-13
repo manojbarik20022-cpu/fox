@@ -190,6 +190,94 @@ class CookieImportError(RuntimeError):
     """Ошибка при импорте cookies из обычного браузера."""
 
 
+# Имена SQLite-файлов с cookies для разных движков.
+# Chrome 96+ переехал на Network/Cookies; старый Chrome и Edge/Brave используют просто Cookies.
+# Firefox держит в cookies.sqlite.
+COOKIE_FILE_PATTERNS = (
+    "Network/Cookies",  # Chromium 96+
+    "Cookies",           # старый Chromium / Edge / Brave
+    "cookies.sqlite",    # Firefox
+)
+
+
+def _resolve_cookie_file(path: str | Path) -> str:
+    """Если ``path`` — файл, вернёт как есть. Если папка — ищет внутри SQLite-файл
+    cookies (Network/Cookies, Cookies или cookies.sqlite). Поддерживает Chrome Portable
+    (где cookies лежат в ``Data/profile/Default/Network/Cookies``).
+
+    Поднимает ``CookieImportError`` если ничего не нашёл.
+    """
+    p = Path(path)
+    if p.is_file():
+        return str(p)
+    if not p.exists():
+        raise CookieImportError(f"Путь не существует: {p}")
+
+    # Кандидаты в порядке убывания приоритета: Default-профиль > любой другой профиль.
+    candidates: list[Path] = []
+    for pattern in COOKIE_FILE_PATTERNS:
+        # 1) Прямо внутри указанной папки.
+        direct = p / pattern
+        if direct.is_file():
+            candidates.append(direct)
+        # 2) Внутри подпапок профиля: Data/profile/Default/<pattern>, profile/Default/<pattern>,
+        #    User Data/Default/<pattern>, и т. п.
+        for prof in p.rglob("Default"):
+            if not prof.is_dir():
+                continue
+            cf = prof / pattern
+            if cf.is_file():
+                candidates.append(cf)
+        # 3) И вообще все Network/Cookies внутри (Chrome multi-profile + Chrome Portable variants).
+        for cf in p.rglob(pattern.split("/")[-1] if "/" in pattern else pattern):
+            if cf.is_file() and cf not in candidates:
+                # Проверяем, что родительская папка — это профиль (Default или Profile *).
+                parent_name = cf.parent.name
+                grandparent = cf.parent.parent.name if cf.parent.parent else ""
+                if (
+                    parent_name == "Network" and grandparent.startswith(("Default", "Profile"))
+                ) or parent_name.startswith(("Default", "Profile")):
+                    candidates.append(cf)
+
+    # Дедуплицируем, сохраняя порядок.
+    seen: set[Path] = set()
+    uniq: list[Path] = []
+    for c in candidates:
+        if c not in seen:
+            seen.add(c)
+            uniq.append(c)
+
+    if not uniq:
+        raise CookieImportError(
+            f"В папке {p} не нашёл файл cookies. Ожидал Default/Network/Cookies "
+            f"(Chrome 96+) или Default/Cookies (старый Chrome / Edge / Brave) "
+            f"или cookies.sqlite (Firefox)."
+        )
+
+    log.info("Auto-resolved cookies file: %s (из %d кандидатов)", uniq[0], len(uniq))
+    return str(uniq[0])
+
+
+def _resolve_key_file(cookie_file: str | Path) -> str | None:
+    """Найти ``Local State`` рядом с Cookies-файлом (для расшифровки DPAPI ключа
+    Chromium на Windows). Возвращает None если не нашёл.
+
+    Структура Chrome Portable: ``<root>/Data/profile/Default/Network/Cookies`` →
+    ``<root>/Data/profile/Local State`` (поднимаемся на 3 уровня).
+    Стандартный Chrome: ``User Data/Default/Network/Cookies`` →
+    ``User Data/Local State`` (тоже 3 уровня).
+    """
+    p = Path(cookie_file).parent
+    for _ in range(5):
+        cand = p / "Local State"
+        if cand.is_file():
+            return str(cand)
+        if p.parent == p:
+            break
+        p = p.parent
+    return None
+
+
 def _convert_cookie(c: Any) -> dict[str, Any]:
     """``http.cookiejar.Cookie`` → формат Playwright ``add_cookies``."""
     same_site = "Lax"
@@ -239,12 +327,30 @@ def _load_browser_cookies(
     if loader is None:
         raise CookieImportError(f"browser_cookie3 не поддерживает {browser}")
 
+    # Если указан путь и это папка (Chrome Portable) — авто-резолвим до Cookies-файла.
+    key_file: str | None = None
+    if cookie_file:
+        cookie_file = _resolve_cookie_file(cookie_file)
+        # Для chromium-форков нужен Local State (DPAPI-key для расшифровки cookies).
+        # Для firefox — не нужно.
+        if browser != "firefox":
+            key_file = _resolve_key_file(cookie_file)
+            if key_file is None:
+                log.warning(
+                    "Не нашёл Local State рядом с %s — будет попытка расшифровки "
+                    "стандартным ключом (для портативного Chrome это может не сработать)",
+                    cookie_file,
+                )
+
     domains = domains or ("",)  # пустая строка = все домены
     seen: set[tuple[str, str, str]] = set()
     cookies: list[dict[str, Any]] = []
+    loader_kwargs: dict[str, Any] = {"cookie_file": cookie_file}
+    if key_file is not None:
+        loader_kwargs["key_file"] = key_file
     for domain in domains:
         try:
-            cj = loader(cookie_file=cookie_file, domain_name=domain)
+            cj = loader(domain_name=domain, **loader_kwargs)
         except Exception as exc:
             raise CookieImportError(
                 f"Не удалось прочитать cookies из {browser} "

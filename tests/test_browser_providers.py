@@ -215,6 +215,76 @@ class CookieImportTests(unittest.TestCase):
             _load_browser_cookies("safari-12-banana")
         self.assertIn("Неизвестный браузер", str(ctx.exception))
 
+    def test_resolve_cookie_file_direct_file(self) -> None:
+        from fox2.providers.browser.sessions import _resolve_cookie_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookies = Path(tmp) / "Cookies"
+            cookies.write_bytes(b"SQLite format 3")
+            self.assertEqual(_resolve_cookie_file(str(cookies)), str(cookies))
+
+    def test_resolve_cookie_file_chrome_portable_modern(self) -> None:
+        """Chrome Portable 96+: Data/profile/Default/Network/Cookies."""
+        from fox2.providers.browser.sessions import _resolve_cookie_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "Chrome Portable"
+            profile = base / "Data" / "profile" / "Default" / "Network"
+            profile.mkdir(parents=True)
+            cookies = profile / "Cookies"
+            cookies.write_bytes(b"SQLite format 3")
+
+            resolved = _resolve_cookie_file(str(base))
+            self.assertEqual(resolved, str(cookies))
+
+    def test_resolve_cookie_file_chrome_portable_old(self) -> None:
+        """Старый Chrome Portable: Data/profile/Default/Cookies (без Network/)."""
+        from fox2.providers.browser.sessions import _resolve_cookie_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "Chrome Portable"
+            profile = base / "Data" / "profile" / "Default"
+            profile.mkdir(parents=True)
+            cookies = profile / "Cookies"
+            cookies.write_bytes(b"SQLite format 3")
+
+            resolved = _resolve_cookie_file(str(base))
+            self.assertEqual(resolved, str(cookies))
+
+    def test_resolve_cookie_file_missing(self) -> None:
+        from fox2.providers.browser import CookieImportError
+        from fox2.providers.browser.sessions import _resolve_cookie_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            empty = Path(tmp) / "empty"
+            empty.mkdir()
+            with self.assertRaises(CookieImportError) as ctx:
+                _resolve_cookie_file(str(empty))
+            self.assertIn("не нашёл файл cookies", str(ctx.exception))
+
+    def test_resolve_key_file_chrome_portable(self) -> None:
+        """Local State должен быть найден рядом с Cookies (для DPAPI-расшифровки)."""
+        from fox2.providers.browser.sessions import _resolve_key_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp) / "Chrome Portable" / "Data" / "profile"
+            (base / "Default" / "Network").mkdir(parents=True)
+            cookies = base / "Default" / "Network" / "Cookies"
+            cookies.write_bytes(b"x")
+            local_state = base / "Local State"
+            local_state.write_text("{}")
+
+            resolved = _resolve_key_file(str(cookies))
+            self.assertEqual(resolved, str(local_state))
+
+    def test_resolve_key_file_not_found(self) -> None:
+        from fox2.providers.browser.sessions import _resolve_key_file
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cookies = Path(tmp) / "Cookies"
+            cookies.write_bytes(b"x")
+            self.assertIsNone(_resolve_key_file(str(cookies)))
+
     def test_load_browser_cookies_propagates_loader_error(self) -> None:
         """Если browser_cookie3 падает (например, нет такого браузера на машине) —
         мы оборачиваем в CookieImportError с понятным сообщением."""
