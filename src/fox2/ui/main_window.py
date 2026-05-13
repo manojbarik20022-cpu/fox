@@ -28,7 +28,7 @@ from .tabs.video_tab import VideoTab
 from .tabs.voice_web_tab import VoiceWebTab
 from .tabs.voicing_tab import VoicingTab
 from .theme import COLOR_BG, COLOR_PANEL, COLOR_PANEL_2, COLOR_RUN, COLOR_RUN_HOVER, COLOR_TEXT
-from .widgets import LabelRow
+from .widgets import LabelRow, install_clipboard_bindings
 
 log = logging.getLogger("fox2.ui.main")
 
@@ -60,6 +60,7 @@ class MainWindow(ctk.CTk):
         self._build_left_panel()
         self._build_right_panel()
         self._wire_log_buffer()
+        install_clipboard_bindings(self)
 
     # ---------- LEFT ----------
     def _build_left_panel(self) -> None:

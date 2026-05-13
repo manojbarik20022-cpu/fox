@@ -1,7 +1,9 @@
 """Маленькие переиспользуемые виджеты."""
 from __future__ import annotations
 
+import contextlib
 import logging
+import tkinter as tk
 from collections.abc import Callable
 from pathlib import Path
 from tkinter import filedialog
@@ -11,6 +13,100 @@ import customtkinter as ctk
 from .theme import COLOR_ACCENT, COLOR_PANEL, COLOR_TEXT_DIM
 
 log = logging.getLogger("fox2.ui.widgets")
+
+
+# Виртуальные keycode-ы клавиш V/C/X/A/Z в Windows VK / X11.
+# На Windows event.keycode = VK_*, который не зависит от раскладки —
+# поэтому Ctrl+V на русской раскладке («м») тоже должен сработать.
+_CTRL_KEYCODES = {
+    86: "paste",       # V
+    67: "copy",        # C
+    88: "cut",         # X
+    65: "select_all",  # A
+    90: "undo",        # Z
+}
+
+_TEXT_WIDGET_CLASSES = ("Entry", "TEntry", "Text", "Spinbox", "TCombobox")
+
+
+def _is_text_widget(widget: tk.Misc | None) -> bool:
+    if widget is None:
+        return False
+    try:
+        return widget.winfo_class() in _TEXT_WIDGET_CLASSES
+    except tk.TclError:
+        return False
+
+
+def _entry_select_all(widget: tk.Misc) -> None:
+    cls = widget.winfo_class()
+    if cls == "Text":
+        widget.tag_add("sel", "1.0", "end-1c")  # type: ignore[attr-defined]
+        widget.mark_set("insert", "end-1c")  # type: ignore[attr-defined]
+    else:
+        try:
+            widget.select_range(0, "end")  # type: ignore[attr-defined]
+            widget.icursor("end")  # type: ignore[attr-defined]
+        except tk.TclError:
+            pass
+
+
+def _dispatch_clipboard(widget: tk.Misc, action: str) -> None:
+    try:
+        if action == "paste":
+            widget.event_generate("<<Paste>>")
+        elif action == "copy":
+            widget.event_generate("<<Copy>>")
+        elif action == "cut":
+            widget.event_generate("<<Cut>>")
+        elif action == "undo":
+            widget.event_generate("<<Undo>>")
+        elif action == "select_all":
+            _entry_select_all(widget)
+    except tk.TclError as exc:
+        log.debug("clipboard action %s failed: %s", action, exc)
+
+
+def _on_ctrl_keypress(event: tk.Event) -> str | None:
+    action = _CTRL_KEYCODES.get(event.keycode)
+    if action is None or not _is_text_widget(event.widget):
+        return None
+    _dispatch_clipboard(event.widget, action)
+    return "break"
+
+
+def _show_context_menu(event: tk.Event) -> str | None:
+    widget = event.widget
+    if not _is_text_widget(widget):
+        return None
+    with contextlib.suppress(tk.TclError):
+        widget.focus_set()
+    menu = tk.Menu(widget, tearoff=0)
+    menu.add_command(label="Вырезать", command=lambda: _dispatch_clipboard(widget, "cut"))
+    menu.add_command(label="Копировать", command=lambda: _dispatch_clipboard(widget, "copy"))
+    menu.add_command(label="Вставить", command=lambda: _dispatch_clipboard(widget, "paste"))
+    menu.add_separator()
+    menu.add_command(label="Выделить всё", command=lambda: _dispatch_clipboard(widget, "select_all"))
+    try:
+        menu.tk_popup(event.x_root, event.y_root)
+    finally:
+        menu.grab_release()
+    return "break"
+
+
+def install_clipboard_bindings(root: tk.Misc) -> None:
+    """Глобальные Ctrl+V/C/X/A/Z для русской раскладки + контекстное меню по правому клику.
+
+    Стандартный tkinter под Windows ловит ``<Control-v>`` по символу,
+    а на русской раскладке Ctrl+V даёт keysym=«м» (Cyrillic_em) — поэтому
+    стандартный биндинг не срабатывает. Слушаем `<Control-KeyPress>` и
+    смотрим на `event.keycode`, который равен Win-VK и не зависит от
+    раскладки. Привязка идёт через ``bind_all`` на корневом окне.
+    """
+    root.bind_all("<Control-KeyPress>", _on_ctrl_keypress, add="+")
+    # Правый клик: на Linux/Win обычно Button-3, на macOS — Button-2.
+    root.bind_all("<Button-3>", _show_context_menu, add="+")
+    root.bind_all("<Button-2>", _show_context_menu, add="+")
 
 
 class LabelRow(ctk.CTkFrame):
