@@ -40,8 +40,12 @@ DEFAULT_UA = (
 )
 
 # Скрипт, который выполняется ДО первого скрипта на странице.
-# Прячет navigator.webdriver, подменяет «Chrome for Testing»-бренд в userAgentData
-# на обычный Google Chrome и навешивает «человеческие» свойства.
+# Прячет navigator.webdriver и навешивает «человеческие» свойства, по которым
+# Google детектит автоматизацию.
+#
+# NB: НЕ подменяем navigator.userAgentData — попытка подмены брендов
+# приводит к зависанию Google login на этапе «Далее» после ввода почты
+# (Google детектит inconsistency между UA и подменённым userAgentData).
 STEALTH_INIT_SCRIPT = r"""
 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
 Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
@@ -55,46 +59,6 @@ if (originalQuery) {
             : originalQuery(parameters)
     );
 }
-
-// Подменяем navigator.userAgentData, чтобы сайты не видели «Chrome for Testing».
-// Это основной сигнал, по которому Google login отличает бундл Playwright.
-try {
-    const fakeBrands = [
-        { brand: 'Google Chrome', version: '131' },
-        { brand: 'Chromium', version: '131' },
-        { brand: 'Not?A_Brand', version: '24' }
-    ];
-    const fakeHighEntropy = {
-        brands: fakeBrands,
-        mobile: false,
-        platform: 'Windows',
-        platformVersion: '15.0.0',
-        architecture: 'x86',
-        bitness: '64',
-        model: '',
-        uaFullVersion: '131.0.6778.108',
-        fullVersionList: [
-            { brand: 'Google Chrome', version: '131.0.6778.108' },
-            { brand: 'Chromium', version: '131.0.6778.108' },
-            { brand: 'Not?A_Brand', version: '24.0.0.0' }
-        ],
-        wow64: false
-    };
-    Object.defineProperty(navigator, 'userAgentData', {
-        configurable: true,
-        get: () => ({
-            brands: fakeBrands,
-            mobile: false,
-            platform: 'Windows',
-            getHighEntropyValues: () => Promise.resolve(fakeHighEntropy),
-            toJSON: () => ({
-                brands: fakeBrands,
-                mobile: false,
-                platform: 'Windows'
-            })
-        })
-    });
-} catch (e) { /* userAgentData недоступен — ничего не делаем */ }
 """
 
 # Аргументы Chromium, которые отключают automation-баннеры/флаги.
