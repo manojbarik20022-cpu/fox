@@ -17,6 +17,8 @@ Google детектирует «обычный» Playwright-Chromium и блок
 from __future__ import annotations
 
 import logging
+import os
+import platform
 import threading
 import time
 from collections.abc import Callable
@@ -56,12 +58,46 @@ if (originalQuery) {
 """
 
 # Аргументы Chromium, которые отключают automation-баннеры/флаги.
+# NB: НЕ передаём --disable-blink-features=AutomationControlled — Chrome 140+
+# внёс его в список «неподдерживаемых флагов» и показывает жёлтую полоску.
+# Скрытие navigator.webdriver делается через add_init_script (STEALTH_INIT_SCRIPT).
 STEALTH_ARGS = [
-    "--disable-blink-features=AutomationControlled",
     "--no-default-browser-check",
     "--no-first-run",
-    "--disable-features=IsolateOrigins,site-per-process",
 ]
+
+
+def _find_system_chrome() -> str | None:
+    """Найти настоящий, установленный пользователем Google Chrome.
+
+    Playwright-овский ``channel="chrome"`` скачивает свой *Chrome for Testing* —
+    это другой бинарник, отдельный от обычного Chrome. Сайты вроде Flow его
+    отличают (например, по бренд-стрингу «Chrome for Testing»). Поэтому ищем
+    обычный Chrome в стандартных местах установки.
+    """
+    system = platform.system()
+    candidates: list[str] = []
+    if system == "Windows":
+        for env_var in ("ProgramFiles", "ProgramFiles(x86)", "LocalAppData"):
+            base = os.environ.get(env_var)
+            if base:
+                candidates.append(str(Path(base) / "Google" / "Chrome" / "Application" / "chrome.exe"))
+    elif system == "Darwin":
+        candidates = [
+            "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+            str(Path.home() / "Applications/Google Chrome.app/Contents/MacOS/Google Chrome"),
+        ]
+    else:  # Linux
+        candidates = [
+            "/usr/bin/google-chrome",
+            "/usr/bin/google-chrome-stable",
+            "/snap/bin/google-chrome",
+            "/opt/google/chrome/google-chrome",
+        ]
+    for c in candidates:
+        if c and Path(c).is_file():
+            return c
+    return None
 
 
 class PlaywrightUnavailable(RuntimeError):
@@ -80,7 +116,7 @@ def _import_playwright() -> Any:
 
 
 def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tuple[int, int]) -> Any:
-    """Пытается запустить системный Chrome, при неудаче — bundled Chromium со стелс-флагами.
+    """Запустить настоящий системный Chrome, при неудаче — bundled Chromium со стелс-флагами.
 
     В обоих случаях навешивает stealth init-script + реалистичный user-agent +
     отключает automation-флаги.
@@ -98,13 +134,23 @@ def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tu
         "ignore_default_args": ["--enable-automation", "--no-sandbox"],
     }
 
-    # 1. Попытка: системный Google Chrome.
-    try:
-        ctx = p.chromium.launch_persistent_context(channel="chrome", **common_kwargs)
-        log.info("Запущен системный Google Chrome (channel=chrome)")
-    except Exception as exc:
-        log.info("Системный Chrome недоступен (%s) — fallback на bundled Chromium", exc)
+    ctx = None
+    # 1. Настоящий Google Chrome из Program Files (не Chrome for Testing).
+    chrome_path = _find_system_chrome()
+    if chrome_path:
+        try:
+            ctx = p.chromium.launch_persistent_context(
+                executable_path=chrome_path, **common_kwargs
+            )
+            log.info("Запущен системный Google Chrome: %s", chrome_path)
+        except Exception as exc:
+            log.info("Системный Chrome (%s) не запустился (%s) — пробуем fallback", chrome_path, exc)
+            ctx = None
+
+    # 2. Fallback: bundled Chromium со стелс-флагами.
+    if ctx is None:
         ctx = p.chromium.launch_persistent_context(**common_kwargs)
+        log.info("Запущен bundled Chromium (системный Chrome не найден)")
 
     # Скрываем navigator.webdriver и т. п. на всех будущих страницах.
     try:
