@@ -98,10 +98,13 @@ def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tu
         "accept_downloads": True,
         "user_agent": DEFAULT_UA,
         "args": STEALTH_ARGS,
-        # Playwright по умолчанию добавляет --enable-automation (палит автоматизацию)
-        # и --no-sandbox (Chrome показывает «неподдерживаемый флаг» жёлтой полоской).
-        # Убираем оба.
-        "ignore_default_args": ["--enable-automation", "--no-sandbox"],
+        # Playwright по умолчанию добавляет --enable-automation — палит автоматизацию,
+        # и Google login после этого блокирует вход с «небезопасный браузер».
+        # NB: --no-sandbox оставляем (Playwright добавит его сам), хоть Chrome 140+
+        # и показывает жёлтую полоску. Без --no-sandbox Google всё равно блокирует
+        # вход — этот стелс-сценарий (d429f55) был проверен пользователем как
+        # рабочий, а вариант с убиранием --no-sandbox — как сломанный.
+        "ignore_default_args": ["--enable-automation"],
     }
 
     # Запускаем bundled Chromium (брендирован как «Chrome for Testing» на странице about:).
