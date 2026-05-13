@@ -2,6 +2,17 @@
 
 Используется UI вкладки «Браузер» (открыть окно для ручного логина) и провайдерами
 Flow/Grok/Nano Banana (фоновая автоматизация под уже залогиненным профилем).
+
+Google детектирует «обычный» Playwright-Chromium и блокирует вход с ошибкой
+«Этот браузер или приложение небезопасны». Чтобы обойти:
+
+1. **Сначала пробуем системный Google Chrome** (``channel="chrome"``) — Google
+   к нему не придирается. Если не установлен — fallback на bundled Chromium.
+2. **Стелс-флаги** на bundled Chromium: отключаем ``--enable-automation``,
+   убираем ``navigator.webdriver``, ставим обычный user-agent.
+
+Этого достаточно для прохождения Google login без перехода на полноценный
+``playwright-stealth``.
 """
 from __future__ import annotations
 
@@ -11,14 +22,46 @@ import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from ...utils.paths import ensure_dir
 
-if TYPE_CHECKING:  # pragma: no cover - только для type checker
-    pass
-
 log = logging.getLogger("fox2.browser.sessions")
+
+
+# Реалистичный user-agent (последний стабильный Chrome). Playwright по умолчанию
+# использует HeadlessChrome/<ver> — это сразу палит автоматизацию.
+DEFAULT_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+# Скрипт, который выполняется ДО первого скрипта на странице.
+# Прячет navigator.webdriver и навешивает «человеческие» свойства, по которым
+# Google детектит автоматизацию.
+STEALTH_INIT_SCRIPT = r"""
+Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+Object.defineProperty(navigator, 'languages', { get: () => ['ru-RU', 'ru', 'en-US', 'en'] });
+Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+window.chrome = window.chrome || { runtime: {} };
+const originalQuery = window.navigator.permissions && window.navigator.permissions.query;
+if (originalQuery) {
+    window.navigator.permissions.query = (parameters) => (
+        parameters.name === 'notifications'
+            ? Promise.resolve({ state: Notification.permission })
+            : originalQuery(parameters)
+    );
+}
+"""
+
+# Аргументы Chromium, которые отключают automation-баннеры/флаги.
+STEALTH_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-default-browser-check",
+    "--no-first-run",
+    "--disable-features=IsolateOrigins,site-per-process",
+]
 
 
 class PlaywrightUnavailable(RuntimeError):
@@ -36,6 +79,39 @@ def _import_playwright() -> Any:
     return sync_playwright
 
 
+def _launch_persistent(p: Any, profile_dir: str, *, headless: bool, viewport: tuple[int, int]) -> Any:
+    """Пытается запустить системный Chrome, при неудаче — bundled Chromium со стелс-флагами.
+
+    В обоих случаях навешивает stealth init-script + реалистичный user-agent +
+    отключает automation-флаги.
+    """
+    common_kwargs = {
+        "user_data_dir": profile_dir,
+        "headless": headless,
+        "viewport": {"width": viewport[0], "height": viewport[1]},
+        "accept_downloads": True,
+        "user_agent": DEFAULT_UA,
+        "args": STEALTH_ARGS,
+        "ignore_default_args": ["--enable-automation"],
+    }
+
+    # 1. Попытка: системный Google Chrome.
+    try:
+        ctx = p.chromium.launch_persistent_context(channel="chrome", **common_kwargs)
+        log.info("Запущен системный Google Chrome (channel=chrome)")
+    except Exception as exc:
+        log.info("Системный Chrome недоступен (%s) — fallback на bundled Chromium", exc)
+        ctx = p.chromium.launch_persistent_context(**common_kwargs)
+
+    # Скрываем navigator.webdriver и т. п. на всех будущих страницах.
+    try:
+        ctx.add_init_script(STEALTH_INIT_SCRIPT)
+    except Exception as exc:
+        log.warning("Не удалось установить stealth init script: %s", exc)
+
+    return ctx
+
+
 @contextmanager
 def chromium_session(
     profile_dir: str | Path,
@@ -46,18 +122,14 @@ def chromium_session(
     """Контекстный менеджер: возвращает (browser_context, page) для Playwright Chromium.
 
     ``profile_dir`` — persistent user-data dir (cookies/local storage сохраняются между
-    запусками). Если папки нет — создаётся.
+    запусками). Если папки нет — создаётся. Применяются стелс-флаги, чтобы Google
+    разрешил логин.
     """
     profile_dir = Path(profile_dir)
     ensure_dir(profile_dir)
     sync_playwright = _import_playwright()
     with sync_playwright() as p:  # type: ignore[misc]
-        ctx = p.chromium.launch_persistent_context(
-            str(profile_dir),
-            headless=headless,
-            viewport={"width": viewport[0], "height": viewport[1]},
-            accept_downloads=True,
-        )
+        ctx = _launch_persistent(p, str(profile_dir), headless=headless, viewport=viewport)
         page = ctx.pages[0] if ctx.pages else ctx.new_page()
         try:
             yield ctx, page
